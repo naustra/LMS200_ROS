@@ -29,8 +29,8 @@ catkin_package(
 ## Your package locations should be listed before other locations
 include_directories(${catkin_INCLUDE_DIRS})
 
-add_executable(sicklms sicklms.cpp)
-target_link_libraries(sicklms ${catkin_LIBRARIES})
+add_executable(lms200_package sicklms.cpp)
+target_link_libraries(lms200_package ${catkin_LIBRARIES})
 
 #############
 ## Install ##
@@ -47,7 +47,7 @@ target_link_libraries(sicklms ${catkin_LIBRARIES})
 # )
 
 ## Mark executables and/or libraries for installation
-install(TARGETS sicklms
+install(TARGETS lms200_package
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
