@@ -47,77 +47,8 @@
 using namespace SickToolbox;
 using namespace std;
 
-void publish_scan(diagnostic_updater::DiagnosedPublisher<sensor_msgs::LaserScan> *pub, uint32_t *range_values,
-                  uint32_t n_range_values, uint32_t *intensity_values,
-                  uint32_t n_intensity_values, double scale, ros::Time start,
-                  double scan_time, bool inverted, float angle_min,
-                  float angle_max, std::string frame_id)
+void publish_scan(ros::Publisher *marker_pub, uint32_t *range_values, uint32_t n_range_values, double scale, ros::Time start, bool inverted, float angle_min, float angle_max,std::string frame_id, std::string node_name)
 {
-  static int scan_count = 0;
-  sensor_msgs::LaserScan scan_msg;
-  scan_msg.header.frame_id = frame_id;
-  scan_count++;
-  if (inverted) {
-    scan_msg.angle_min = angle_max;
-    scan_msg.angle_max = angle_min;
-  } else {
-    scan_msg.angle_min = angle_min;
-    scan_msg.angle_max = angle_max;
-  }
-  scan_msg.angle_increment = (scan_msg.angle_max - scan_msg.angle_min) / (double)(n_range_values-1);
-  scan_msg.scan_time = scan_time;
-  scan_msg.time_increment = scan_time / (2*M_PI) * scan_msg.angle_increment;
-  scan_msg.range_min = 0;
-  if (scale == 0.01) {
-    scan_msg.range_max = 81;
-  }
-  else if (scale == 0.001) {
-    scan_msg.range_max = 8.1;
-  }
-  scan_msg.ranges.resize(n_range_values);
-  scan_msg.header.stamp = start;
-  for (size_t i = 0; i < n_range_values; i++) {
-    // Check for overflow values, see pg 124 of the Sick LMS telegram listing
-    switch (range_values[i])
-    {
-    // 8m or 80m operation
-    case 8191: // Measurement not valid
-      scan_msg.ranges[i] = numeric_limits<float>::quiet_NaN();
-      break;
-    case 8190: // Dazzling
-      scan_msg.ranges[i] = numeric_limits<float>::quiet_NaN();
-      break;
-    case 8189: // Operation Overflow
-      scan_msg.ranges[i] = numeric_limits<float>::quiet_NaN();
-      break;
-    case 8187: // Signal to Noise ratio too small
-      scan_msg.ranges[i] = numeric_limits<float>::quiet_NaN();
-      break;
-    case 8186: // Error when reading channel 1
-      scan_msg.ranges[i] = numeric_limits<float>::quiet_NaN();
-      break;
-    case 8183: // Measured value > maximum Value
-      scan_msg.ranges[i] = numeric_limits<float>::infinity();
-      break;
-    default:
-      scan_msg.ranges[i] = (float)range_values[i] * (float)scale;
-    }
-  }
-
-  // Intensity always equals to 0
-  scan_msg.intensities.resize(n_intensity_values);
-  for (size_t i = 0; i < n_intensity_values; i++) {
-    scan_msg.intensities[i] = (float)intensity_values[i];
-  }
-
-  pub->publish(scan_msg);
-}
-
-void publish_scan2(ros::Publisher *marker_pub, uint32_t *range_values, uint32_t n_range_values, double scale, ros::Time start, bool inverted, float angle_min, float angle_max,std::string frame_id, std::string node_name)
-{
-  // To count the laser data which are displayed
-  static int scan_count = 0;
-
   // Marker and its initialization
   visualization_msgs::Marker line_list;
   line_list.header.frame_id = frame_id;
@@ -131,14 +62,11 @@ void publish_scan2(ros::Publisher *marker_pub, uint32_t *range_values, uint32_t 
   line_list.type = visualization_msgs::Marker::LINE_LIST;
 
   // Line width
-  line_list.scale.x = 0.1;
+  line_list.scale.x = 0.01;
 
   // Line list is red
   line_list.color.r = 1.0;
   line_list.color.a = 1.0;
-
-  // Variable for nullity
-  int test_null = 0;
 
   // Angles array (181 max number)
   float angles[181];
@@ -169,16 +97,11 @@ void publish_scan2(ros::Publisher *marker_pub, uint32_t *range_values, uint32_t 
     {
     // Wrong cases
     case (8191 || 8190 || 8189 || 8187 || 8186 || 8183) : 
-      test_null = 1;
-      break;
-    }
-
-    if (test_null==1){
       p.x = 0;
       p.y = 0;
-      test_null=0;
-    }
-    else {
+      break;
+
+    default :
       p.x = (float)range_values[i] * (float)scale * cos(angles[i]);
       p.y = (float)range_values[i] * (float)scale * sin(angles[i]);
     }
@@ -227,36 +150,6 @@ int main(int argc, char **argv)
   double angle_increment = 0;
   float angle_min = 0.0;
   float angle_max = 0.0;
-	
-  // Diagnostic publisher parameters
-  double desired_freq;
-  nh_ns.param<double>("desired_frequency", desired_freq, 75.0);
-  double min_freq;
-  nh_ns.param<double>("min_frequency", min_freq, desired_freq);
-  double max_freq;
-  nh_ns.param<double>("max_frequency", max_freq, desired_freq);
-  double freq_tolerance; // Tolerance before error, fractional percent of frequency.
-  nh_ns.param<double>("frequency_tolerance", freq_tolerance, 0.3);
-  int window_size; // Number of samples to consider in frequency
-  nh_ns.param<int>("window_size", window_size, 30);
-  double min_delay; // The minimum publishing delay (in seconds) before error.  Negative values mean future dated messages.
-  nh_ns.param<double>("min_acceptable_delay", min_delay, 0.0);
-  double max_delay; // The maximum publishing delay (in seconds) before error.
-  nh_ns.param<double>("max_acceptable_delay", max_delay, 0.2);
-  std::string hardware_id;
-  nh_ns.param<std::string>("hardware_id", hardware_id, "SICK LMS");
-  double time_offset_sec;
-  nh_ns.param<double>("time_offset", time_offset_sec, 0.0);
-  ros::Duration time_offset(time_offset_sec);
-	
-  // Set up diagnostics
-  diagnostic_updater::Updater updater;
-  updater.setHardwareID(hardware_id);
-  diagnostic_updater::DiagnosedPublisher<sensor_msgs::LaserScan> scan_pub(nh.advertise<sensor_msgs::LaserScan>("scan", 10), updater, 
-									  diagnostic_updater::FrequencyStatusParam(&min_freq, &max_freq, 
-														   freq_tolerance, 
-														   window_size),
-									  diagnostic_updater::TimeStampStatusParam(min_delay, max_delay));
 
   // Visualization of lines publisher
    ros::Publisher marker_pub = nh.advertise<visualization_msgs::Marker>("visualization_marker", 10);
@@ -270,6 +163,11 @@ int main(int argc, char **argv)
   nh_ns.param("resolution", resolution, 0.0);
   nh_ns.param("units", measuring_units, string());
   nh_ns.param<std::string>("frame_id", frame_id, "laser");
+
+  // Time offset
+  double time_offset_sec;
+  nh_ns.param<double>("time_offset", time_offset_sec, 0.0);
+  ros::Duration time_offset(time_offset_sec);
 
   SickLMS2xx::sick_lms_2xx_baud_t desired_baud = SickLMS2xx::IntToSickBaud(baud);
   if (desired_baud == SickLMS2xx::SICK_BAUD_UNKNOWN)
@@ -446,17 +344,11 @@ int main(int argc, char **argv)
 	  // Add user provided time offset to handle constant latency.
 	  ros::Time end_of_scan = ros::Time::now();
 	  ros::Time start = end_of_scan - ros::Duration(scan_time / 2.0) + time_offset;
-	      
-	  publish_scan(&scan_pub, range_values, n_range_values, intensity_values, n_intensity_values, scale, start, scan_time, inverted, angle_min, angle_max, frame_id);
-	  ros::spinOnce();
 
 	  // Publishing second scan with lines
-	  publish_scan2(&marker_pub, range_values, n_range_values, scale, start, inverted, angle_min, angle_max, frame_id, node_name);
+	  publish_scan(&marker_pub, range_values, n_range_values, scale, start, inverted, angle_min, angle_max, frame_id, node_name);
 	  
 	  ros::spinOnce();
-
-	  // Update diagnostics
-	  updater.update();
 	}
     }
   catch (...)
