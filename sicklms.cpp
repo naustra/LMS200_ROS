@@ -32,12 +32,18 @@
 #include <csignal>
 #include <cstdio>
 #include <math.h>
+#include <cmath>
 #include <limits>
 #include <sicktoolbox/SickLMS2xx.hh>
-#include "ros/ros.h"
+#include <ros/ros.h>
 #include "sensor_msgs/LaserScan.h"
-#include <diagnostic_updater/diagnostic_updater.h> // Publishing over the diagnostics channels.
+#include <visualization_msgs/Marker.h>
+
+// Publishing over the diagnostics channels.
+#include <diagnostic_updater/diagnostic_updater.h>
 #include <diagnostic_updater/publisher.h>
+
+// Namespaces
 using namespace SickToolbox;
 using namespace std;
 
@@ -107,6 +113,88 @@ void publish_scan(diagnostic_updater::DiagnosedPublisher<sensor_msgs::LaserScan>
   pub->publish(scan_msg);
 }
 
+void publish_scan2(ros::Publisher *marker_pub, uint32_t *range_values, uint32_t n_range_values, double scale, ros::Time start, bool inverted, float angle_min, float angle_max,std::string frame_id, std::string node_name)
+{
+  // To count the laser data which are displayed
+  static int scan_count = 0;
+
+  // Marker and its initialization
+  visualization_msgs::Marker line_list;
+  line_list.header.frame_id = frame_id;
+  line_list.header.stamp = start;
+  line_list.ns = node_name;
+  line_list.action = visualization_msgs::Marker::ADD;
+  line_list.pose.orientation.w = 1.0;
+
+  line_list.id = 1;
+
+  line_list.type = visualization_msgs::Marker::LINE_LIST;
+
+  // Line width
+  line_list.scale.x = 0.1;
+
+  // Line list is red
+  line_list.color.r = 1.0;
+  line_list.color.a = 1.0;
+
+  // Variable for nullity
+  int test_null = 0;
+
+  // Angles array (181 max number)
+  float angles[181];
+
+  // Invert if necessary
+  if (inverted) {
+    float temp;
+    temp = angle_max;
+    angle_max = angle_min;
+    angle_min = temp;
+  } 
+
+  // Calculate angle_increment
+  float angle_increment = (angle_max - angle_min) / (double)(n_range_values-1);
+
+    // Filling angles array
+  for (size_t i = 0; i < n_range_values; i++){
+    angles[i] = angle_min + angle_increment*i;
+  }
+
+  // Point to stock in array
+  geometry_msgs::Point p;
+  p.z = 0;
+
+  for (size_t i = 0; i < n_range_values; i++) {
+    // Check for overflow values, see pg 124 of the Sick LMS telegram listing
+    switch (range_values[i])
+    {
+    // Wrong cases
+    case (8191 || 8190 || 8189 || 8187 || 8186 || 8183) : 
+      test_null = 1;
+      break;
+    }
+
+    if (test_null==1){
+      p.x = 0;
+      p.y = 0;
+      test_null=0;
+    }
+    else {
+      p.x = (float)range_values[i] * (float)scale * cos(angles[i]);
+      p.y = (float)range_values[i] * (float)scale * sin(angles[i]);
+    }
+
+    // We had twice the content to keep points
+    line_list.points.push_back(p);
+    //line_list.points.push_back(p);
+
+    if (i == 180)
+      line_list.points.push_back(p);
+  }
+
+  // Publish marker
+  marker_pub->publish(line_list);
+}
+
 SickLMS2xx::sick_lms_2xx_measuring_units_t StringToLmsMeasuringUnits(string units)
 {
   if (units.compare("mm") == 0)
@@ -120,9 +208,13 @@ SickLMS2xx::sick_lms_2xx_measuring_units_t StringToLmsMeasuringUnits(string unit
 
 int main(int argc, char **argv)
 {
-  ros::init(argc, argv, "sicklms");
+  // ROS initialization
+  std::string node_name = "sicklms";
+  ros::init(argc, argv, node_name);
   ros::NodeHandle nh;
   ros::NodeHandle nh_ns("~");
+
+  // SICK Parameters
   string port;
   int baud;
   int delay;
@@ -165,7 +257,11 @@ int main(int argc, char **argv)
 														   freq_tolerance, 
 														   window_size),
 									  diagnostic_updater::TimeStampStatusParam(min_delay, max_delay));
+
+  // Visualization of lines publisher
+   ros::Publisher marker_pub = nh.advertise<visualization_msgs::Marker>("visualization_marker", 10);
 	
+  // Definition of node's parameters
   nh_ns.param("port", port, string("/dev/lms200"));
   nh_ns.param("baud", baud, 38400);
   nh_ns.param("connect_delay", delay, 0);
@@ -296,8 +392,8 @@ int main(int argc, char **argv)
 	}
       }
 
-      // For our LMS200-30106, resolution is 1Â° and scan_time 13.33 ms (180Â° of angle) 
-      // because with a resolution of 0.25Â°, the scan angle is reduced to 100Â°
+      // For our LMS200-30106, resolution is 0.5° and scan_time 13.33 ms (180° of angle) 
+      // because with a resolution of 0.25°, the scan angle is reduced to 100°
 	  
       // The increment for the slower LMS is still 1.0 even if its set to
       // 0.5 or 0.25 degrees resolution because it is interleaved. So for
@@ -305,6 +401,8 @@ int main(int argc, char **argv)
       // show up as two seperate LaserScan messages.
       angle_increment = 1.0;
       angle_offset = (180.0-angle)/2;
+
+      // Creating arr
     }
   catch (...)
     {
@@ -334,6 +432,12 @@ int main(int argc, char **argv)
 	    angle_min = (-90.0 + angle_offset + partialScanOffset) * M_PI / 180.0;
 	    angle_max = (90.0 - angle_offset - fmod(1.0 - partialScanOffset, 1.0))
 	      * M_PI / 180.0;
+
+	    // Affichage d'angles et de résolutions
+	    /*ROS_INFO("Angle min : %f", angle_min);
+	    ROS_INFO("Angle max : %f", angle_max);
+	    ROS_INFO("Partial Scan Index : %d", partial_scan_index);
+	    ROS_INFO("Num Values : %d", n_range_values);*/
 	  }
 
 	  // Figure out the time that the scan started. Since we just
@@ -343,10 +447,14 @@ int main(int argc, char **argv)
 	  ros::Time end_of_scan = ros::Time::now();
 	  ros::Time start = end_of_scan - ros::Duration(scan_time / 2.0) + time_offset;
 	      
-	  publish_scan(&scan_pub, range_values, n_range_values, intensity_values,
-		       n_intensity_values, scale, start, scan_time, inverted,
-		       angle_min, angle_max, frame_id);
+	  publish_scan(&scan_pub, range_values, n_range_values, intensity_values, n_intensity_values, scale, start, scan_time, inverted, angle_min, angle_max, frame_id);
 	  ros::spinOnce();
+
+	  // Publishing second scan with lines
+	  publish_scan2(&marker_pub, range_values, n_range_values, scale, start, inverted, angle_min, angle_max, frame_id, node_name);
+	  
+	  ros::spinOnce();
+
 	  // Update diagnostics
 	  updater.update();
 	}
@@ -369,4 +477,3 @@ int main(int argc, char **argv)
 	
   return 0;
 }
-
