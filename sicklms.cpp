@@ -50,23 +50,23 @@ using namespace std;
 void publish_scan(ros::Publisher *marker_pub, uint32_t *range_values, uint32_t n_range_values, double scale, ros::Time start, bool inverted, float angle_min, float angle_max,std::string frame_id, std::string node_name)
 {
   // Marker and its initialization
-  visualization_msgs::Marker line_list;
-  line_list.header.frame_id = frame_id;
-  line_list.header.stamp = start;
-  line_list.ns = node_name;
-  line_list.action = visualization_msgs::Marker::ADD;
-  line_list.pose.orientation.w = 1.0;
+  visualization_msgs::Marker line_strip;
+  line_strip.header.frame_id = frame_id;
+  line_strip.header.stamp = start;
+  line_strip.ns = node_name;
+  line_strip.action = visualization_msgs::Marker::ADD;
+  line_strip.pose.orientation.w = 1.0;
 
-  line_list.id = 1;
+  line_strip.id = 1;
 
-  line_list.type = visualization_msgs::Marker::LINE_LIST;
+  line_strip.type = visualization_msgs::Marker::LINE_STRIP;
 
   // Line width
-  line_list.scale.x = 0.01;
+  line_strip.scale.x = 0.01;
 
-  // Line list is red
-  line_list.color.r = 1.0;
-  line_list.color.a = 1.0;
+  // Line strip is red
+  line_strip.color.r = 1.0;
+  line_strip.color.a = 1.0;
 
   // Angles array (181 max number)
   float angles[181];
@@ -106,16 +106,12 @@ void publish_scan(ros::Publisher *marker_pub, uint32_t *range_values, uint32_t n
       p.y = (float)range_values[i] * (float)scale * sin(angles[i]);
     }
 
-    // We had twice the content to keep points
-    line_list.points.push_back(p);
-    //line_list.points.push_back(p);
-
-    if (i == 180)
-      line_list.points.push_back(p);
+    // We add the points
+    line_strip.points.push_back(p);
   }
 
   // Publish marker
-  marker_pub->publish(line_list);
+  marker_pub->publish(line_strip);
 }
 
 SickLMS2xx::sick_lms_2xx_measuring_units_t StringToLmsMeasuringUnits(string units)
